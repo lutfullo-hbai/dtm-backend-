@@ -38,9 +38,24 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
+# Assigned automatically in tests/conftest.py from the fixtures a test uses.
+markers = [
+    "unit: needs no Docker (no PostgreSQL or Redis container)",
+    "integration: runs against real PostgreSQL and Redis containers (needs Docker)",
+]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 asyncio_default_test_loop_scope = "function"
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+# Plan: overall floor 80% (95% for mastery and planner once those modules exist).
+fail_under = 80
+show_missing = true
+skip_covered = true
 
 [tool.ruff]
 target-version = "py313"
@@ -122,6 +137,11 @@ files = ["app", "tests", "scripts", "migrations"]
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# The Docker SDK ships no type information; tests only catch its DockerException.
+module = ["docker", "docker.*"]
+ignore_missing_imports = true
 
 [tool.pydantic-mypy]
 init_forbid_extra = true
@@ -209,8 +229,10 @@ min_confidence = 60
 ignore_decorators = ["@router.*", "@field_validator", "@model_validator", "@pytest.fixture"]
 # pydantic reads model_config and calls settings_customise_sources; vulture flags the
 # conventional `cls` of classmethod validators. Alembic reads a revision's identifiers
-# and calls its upgrade/downgrade; SQLAlchemy reads the base's type_annotation_map.
+# and calls its upgrade/downgrade; SQLAlchemy reads the base's type_annotation_map;
+# pytest calls its pytest_* hooks.
 ignore_names = [
+    "pytest_*",
     "model_config",
     "settings_customise_sources",
     "cls",

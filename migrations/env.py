@@ -9,7 +9,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import Connection, pool
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.core.config import get_settings
 from app.core.db import Base
@@ -55,23 +55,31 @@ def _run_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
-async def _run_async_migrations() -> None:
+async def _run_async_migrations(engine: AsyncEngine) -> None:
+    async with engine.connect() as connection:
+        await connection.run_sync(_run_migrations)
+
+
+async def _run_with_own_engine() -> None:
     # NullPool: a one-off process holds one connection and must not keep it.
     engine = create_async_engine(_database_url(), poolclass=pool.NullPool)
     try:
-        async with engine.connect() as connection:
-            await connection.run_sync(_run_migrations)
+        await _run_async_migrations(engine)
     finally:
         await engine.dispose()
 
 
 def run_migrations_online() -> None:
-    """Run against a database; reuses a connection handed in by tests (pytest-alembic)."""
-    connection = config.attributes.get("connection")
-    if isinstance(connection, Connection):
-        _run_migrations(connection)
-        return
-    asyncio.run(_run_async_migrations())
+    """Run against a database.
+
+    pytest-alembic hands in its own engine as `config.attributes["connection"]`; it
+    stays the caller's to dispose. Otherwise an engine is built from DATABASE_URL.
+    """
+    handed_in = config.attributes.get("connection")
+    if isinstance(handed_in, AsyncEngine):
+        asyncio.run(_run_async_migrations(handed_in))
+    else:
+        asyncio.run(_run_with_own_engine())
 
 
 if context.is_offline_mode():

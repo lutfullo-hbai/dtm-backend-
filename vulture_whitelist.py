@@ -12,3 +12,6 @@ Convention (min_confidence 60 reports unused class attributes):
 
 This file is parsed by vulture only; it is never imported or executed.
 """
+
+_.ryuk_disabled  # tests/conftest.py: testcontainers config attribute, read when a container starts
+_.it_parent_id  # tests/integration/test_model_base.py: SQLAlchemy column, read by the ORM

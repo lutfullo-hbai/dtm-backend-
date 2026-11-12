@@ -1,7 +1,7 @@
 """API tests for /health and /ready that need no running PostgreSQL or Redis.
 
-The ready-path against real services is covered once the container-based test
-foundation exists (M0-07).
+The ready-path against real PostgreSQL and Redis is in
+tests/integration/test_readiness.py.
 """
 
 import asyncio

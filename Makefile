@@ -13,8 +13,8 @@ NOQA_WITHOUT_REASON := \#[[:space:]]*((ruff|flake8)[[:space:]]*:[[:space:]]*)?no
 # let other modules reach its repository or models without import-linter noticing.
 MODULE_INITS_DIR := app/modules
 
-.PHONY: help install lint noqa-check module-init-check format typecheck test openapi openapi-check \
-	migrate migration downgrade
+.PHONY: help install lint noqa-check module-init-check format typecheck test test-unit \
+	test-integration test-clean openapi openapi-check migrate migration downgrade
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -51,8 +51,22 @@ format: ## Apply ruff fixes and formatting
 typecheck: ## mypy --strict over app, tests, scripts and migrations
 	$(UV_RUN) mypy
 
-test: ## Run the test suite
-	$(UV_RUN) pytest
+# Integration tests start PostgreSQL and Redis containers (testcontainers) and fail,
+# never skip, when Docker is unavailable.
+test: ## All tests with branch coverage (fails under 80%); needs Docker
+	$(UV_RUN) pytest --cov --cov-report=term
+
+test-unit: ## Tests that need no Docker
+	$(UV_RUN) pytest -m unit
+
+test-integration: ## Tests against real PostgreSQL and Redis containers; needs Docker
+	$(UV_RUN) pytest -m integration
+
+# Normally nothing is left: fixtures remove their containers, also on Ctrl-C/SIGTERM;
+# only a killed run (SIGKILL) leaks them. This removes every testcontainers container
+# on this Docker daemon, including those of another test run still in progress.
+test-clean: ## Remove leftover test containers (label org.testcontainers=true)
+	docker ps -aq --filter label=org.testcontainers=true | xargs -r docker rm -f
 
 openapi: ## Regenerate docs/api/openapi.json
 	$(UV_RUN) python -m scripts.export_openapi
