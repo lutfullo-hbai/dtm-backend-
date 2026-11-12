@@ -41,3 +41,238 @@ addopts = ["--strict-markers", "--strict-config"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 asyncio_default_test_loop_scope = "function"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["."]
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes: F401 unused import, F841 unused variable, ...
+    "I",     # import order
+    "N",     # pep8 naming
+    "UP",    # pyupgrade
+    "B",     # bugbear
+    "A",     # shadowing builtins
+    "C4",    # comprehensions
+    "C90",   # mccabe: C901 complexity
+    "DTZ",   # naive datetimes
+    "T10",   # debugger calls (breakpoint, pdb)
+    "T20",   # print / pprint
+    "ERA",   # commented-out code
+    "TD",    # TODO format: TODO(#123): text
+    "PL",    # pylint: PLR0913 args, PLR0915 statements, ...
+    "ASYNC", # blocking calls inside async functions
+    "S",     # bandit security checks
+    "BLE",   # blind except
+    "FBT",   # boolean positional parameters
+    "RET",   # return consistency
+    "SIM",   # simplifications
+    "PTH",   # pathlib over os.path
+    "ARG",   # unused arguments
+    "PIE",   # misc lints
+    "PT",    # pytest style
+    "LOG",   # logging misuse
+    "G",     # logging format strings
+    "TID",   # banned / relative imports
+    "PGH",   # blanket noqa / type: ignore
+    "FAST",  # FastAPI
+    "RUF",   # ruff-specific, incl. RUF100 unused noqa
+]
+ignore = [
+    # The HTTP contract requires response_model on every operation so OpenAPI is explicit.
+    "FAST001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",    # pytest asserts are the assertion mechanism
+    "PLR2004", # literal expected values are the point of a test
+    "S105",    # fake credentials in fixtures are deliberate test data
+    "S106",    # same, passed as keyword arguments
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-statements = 50
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["app", "tests", "scripts"]
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined"]
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.importlinter]
+root_packages = ["app"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Core does not depend on feature modules or the app factory"
+type = "forbidden"
+source_modules = ["app.core"]
+forbidden_modules = ["app.modules", "app.main"]
+
+[[tool.importlinter.contracts]]
+name = "Feature modules do not depend on the app factory"
+type = "forbidden"
+source_modules = ["app.modules"]
+forbidden_modules = ["app.main"]
+
+[[tool.importlinter.contracts]]
+name = "Each module is layered router -> service -> repository -> schemas -> models"
+type = "layers"
+containers = ["app.modules.*"]
+# Parenthesised layers are optional; every module must at least have a service.
+layers = ["(router)", "service", "(repository)", "(schemas)", "(models)"]
+
+[[tool.importlinter.contracts]]
+name = "Routers reach data only through their service"
+type = "forbidden"
+source_modules = ["app.modules.*.router"]
+forbidden_modules = ["app.modules.*.repository", "sqlalchemy", "redis"]
+# Direct imports only: a router reaching its service, which uses SQLAlchemy, is fine.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Services and repositories know nothing about HTTP"
+type = "forbidden"
+source_modules = ["app.modules.*.service", "app.modules.*.repository"]
+# Inbound HTTP only. httpx is deliberately not listed: outbound HTTP clients will live
+# in adapters (in app.core or a dedicated module), decided when the first one is needed.
+forbidden_modules = ["fastapi", "starlette"]
+# Direct imports only: AppError lives in app.core.errors, which renders via FastAPI.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Services hold no SQL or Redis calls; those live in the repository"
+type = "forbidden"
+source_modules = ["app.modules.*.service"]
+forbidden_modules = ["sqlalchemy", "asyncpg", "redis"]
+# import-linter can forbid only top-level external packages, and an ignore_imports
+# entry for `-> sqlalchemy.ext.asyncio` never matches (externals are one graph node),
+# so the session/engine types cannot be carved out here. A service that needs
+# AsyncSession/AsyncEngine imports them from app.core.db, which re-exports them.
+# Direct imports only: a service may use app.core helpers built on these packages.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Modules talk to each other only through the other module's service"
+type = "forbidden"
+source_modules = ["app.modules.*"]
+forbidden_modules = [
+    "app.modules.*.router",
+    "app.modules.*.repository",
+    "app.modules.*.schemas",
+    "app.modules.*.models",
+]
+# Cross-module ORM relationships (one module's model referencing another's) need an
+# explicit decision (ADR) before any ignore_imports entry is added for them.
+# Re-exports through app/modules/*/__init__.py would bypass this contract, so
+# `make module-init-check` keeps those files free of imports.
+# Direct imports only: importing another module's service pulls in its internals.
+allow_indirect_imports = true
+
+[tool.vulture]
+# vulture_whitelist.py holds names that are used only by a framework (ORM columns,
+# pydantic fields read during serialization); see the convention in that file.
+paths = ["app", "tests", "scripts", "vulture_whitelist.py"]
+# 60 is the level at which vulture reports unused functions, classes and methods.
+min_confidence = 60
+# Called by the framework, not by our code: route handlers, pydantic validators and
+# pytest fixtures (injected by name, autouse ones are never referenced at all).
+ignore_decorators = ["@router.*", "@field_validator", "@model_validator", "@pytest.fixture"]
+# pydantic reads model_config and calls settings_customise_sources; vulture flags the
+# conventional `cls` of classmethod validators.
+ignore_names = ["model_config", "settings_customise_sources", "cls"]
+
+[tool.commitizen]
+# Custom rules: the plan allows exactly feat, fix, refactor, perf, test, docs, ci, chore.
+name = "cz_customize"
+tag_format = "v$version"
+# Reads and bumps [project].version and the matching uv.lock entry together.
+version_provider = "uv"
+version_scheme = "semver2"
+# The plan keeps v0.<milestone>.<patch> until v1.0.0.
+major_version_zero = true
+# Keep the OpenAPI `info.version` in step with the project version on bump.
+version_files = ["app/main.py:^API_VERSION"]
+update_changelog_on_bump = false
+# The 72-character subject limit is passed as `cz check -l 72` (commit-msg hook, and
+# CI from M0-09): cz check ignores message_length_limit from this file.
+# git's own `Revert "..."` is not accepted either: write `fix(scope): revert ...`.
+allowed_prefixes = ["Merge", "fixup!", "squash!", "amend!"]
+
+[tool.commitizen.customize]
+schema = "<type>(<scope>)!: <subject>\n\n<body: why, not what>\n\n<footer>"
+schema_pattern = '(?s)^(feat|fix|refactor|perf|test|docs|ci|chore)(\([a-z0-9][a-z0-9_-]*\))?!?: \S.*'
+example = "fix(practice): reject answers after session finish"
+info = "Types: feat, fix, refactor, perf, test, docs, ci, chore. Scope is the module name."
+message_template = "{{change_type}}{% if scope %}({{scope}}){% endif %}{% if breaking %}!{% endif %}: {{subject}}{% if body %}\n\n{{body}}{% endif %}"
+# BREAKING CHANGE is matched per line, so it counts in a footer too.
+bump_pattern = '^((BREAKING[- ]CHANGE|feat|fix|refactor|perf|test|docs|ci|chore)(\([a-z0-9][a-z0-9_-]*\))?!?):'
+
+# Checked in order; the first match wins. While major_version_zero is true,
+# commitizen demotes MAJOR to MINOR, so 0.x stays 0.x until v1.0.0.
+[tool.commitizen.customize.bump_map]
+'^.+!$' = "MAJOR"
+'^BREAKING[- ]CHANGE' = "MAJOR"
+'^feat' = "MINOR"
+'^fix' = "PATCH"
+'^perf' = "PATCH"
+'^refactor' = "PATCH"
+
+[[tool.commitizen.customize.questions]]
+type = "list"
+name = "change_type"
+message = "Type of change"
+choices = [
+    { value = "feat", name = "feat: a new feature" },
+    { value = "fix", name = "fix: a bug fix" },
+    { value = "refactor", name = "refactor: no behaviour change" },
+    { value = "perf", name = "perf: performance improvement" },
+    { value = "test", name = "test: tests only" },
+    { value = "docs", name = "docs: documentation only" },
+    { value = "ci", name = "ci: CI configuration" },
+    { value = "chore", name = "chore: tooling and maintenance" },
+]
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "scope"
+message = "Scope (module name, optional)"
+
+[[tool.commitizen.customize.questions]]
+type = "confirm"
+name = "breaking"
+message = "Breaking change?"
+default = false
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "subject"
+message = "Subject (imperative, the whole first line <= 72 characters)"
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "body"
+message = "Body: why this change (optional)"

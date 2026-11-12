@@ -1,0 +1,27 @@
+# The pre-commit hook runs `make lint`, the same target CI runs, over the same paths
+# (app, tests, scripts), so a hook and CI can never disagree about which checks run,
+# which files they see, or which tool version is used (all via `uv run --frozen`).
+# pre-commit stashes unstaged changes first, so the checks see what is being committed;
+# untracked files are still on disk and are checked too. Install with:
+#   uv run pre-commit install
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+fail_fast: false
+
+repos:
+  - repo: local
+    hooks:
+      - id: make-lint
+        name: make lint (ruff, mypy, import-linter, vulture, file length, noqa, module inits)
+        entry: make --no-print-directory lint
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+
+      - id: commitizen
+        name: conventional commit message
+        # -l is passed explicitly: cz check ignores message_length_limit from config.
+        entry: uv run --frozen cz check -l 72 --allow-abort --commit-msg-file
+        language: system
+        stages: [commit-msg]
