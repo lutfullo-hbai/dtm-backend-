@@ -16,21 +16,35 @@ MODULE_INITS_DIR := app/modules
 COMPOSE := VCS_REF=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown) docker compose
 READY_TIMEOUT_SECONDS := 60
 
-.PHONY: help install lint noqa-check module-init-check format typecheck test test-unit \
-	test-integration test-clean openapi openapi-check migrate migration downgrade \
-	up down logs ps migrate-docker
+# CI (.github/workflows/ci.yml) runs these targets, so CI and a local run execute the
+# same commands: ci-lint, typecheck, test, test-migrations, migrations-roundtrip,
+# openapi-check and image.
+IMAGE := dtm-backend:ci
+VCS_REF ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+APP_UID := 10001
 
+.PHONY: help install lint ci-lint noqa-check module-init-check format typecheck test \
+	test-unit test-integration test-migrations test-clean migrations-roundtrip openapi \
+	openapi-check migrate migration downgrade image up down logs ps migrate-docker
+
+# The name column is as wide as the longest target name, so every description aligns.
 help: ## List available targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' \
+		'{ name[NR] = $$1; text[NR] = $$2; if (length($$1) > width) width = length($$1) } \
+		END { for (i = 1; i <= NR; i++) printf "  %-" width "s  %s\n", name[i], text[i] }'
 
 install: ## Install locked dependencies (incl. dev group)
 	uv sync --frozen
 
-# The pre-commit hook runs exactly this target, so the hook and CI cannot drift apart.
-lint: ## All static checks (no file changes)
+# The pre-commit hook runs exactly this target; CI runs its two halves as the `lint`
+# and `typecheck` jobs, so the hook and CI cannot drift apart.
+lint: ## All static checks (no file changes): ci-lint, then typecheck
+	$(MAKE) --no-print-directory ci-lint
+	$(MAKE) --no-print-directory typecheck
+
+ci-lint: ## Style, import contracts and code-quality checks (lint without mypy)
 	$(UV_RUN) ruff check $(PY_PATHS)
 	$(UV_RUN) ruff format --check $(PY_PATHS)
-	$(UV_RUN) mypy
 	$(UV_RUN) lint-imports --no-logo
 	$(UV_RUN) vulture
 	$(UV_RUN) python -m scripts.check_file_length
@@ -66,11 +80,29 @@ test-unit: ## Tests that need no Docker
 test-integration: ## Tests against real PostgreSQL and Redis containers; needs Docker
 	$(UV_RUN) pytest -m integration
 
+test-migrations: ## Migration history tests (pytest-alembic); needs Docker
+	$(UV_RUN) pytest tests/migrations
+
 # Normally nothing is left: fixtures remove their containers, also on Ctrl-C/SIGTERM;
 # only a killed run (SIGKILL) leaks them. This removes every testcontainers container
 # on this Docker daemon, including those of another test run still in progress.
 test-clean: ## Remove leftover test containers (label org.testcontainers=true)
 	docker ps -aq --filter label=org.testcontainers=true | xargs -r docker rm -f
+
+# Through the alembic CLI and env.py, as the one-off migrate process runs in production.
+# Needs DATABASE_URL (and the other required settings) for a disposable database.
+# `downgrade base` drops every table: the target refuses to run unless APP_ENV=test
+# (as in CI), so a shell pointed at a real database cannot wipe it by accident.
+migrations-roundtrip: ## upgrade head, downgrade base, upgrade head, then alembic check
+	@if [ "$${APP_ENV:-}" != "test" ]; then \
+		echo 'migrations-roundtrip drops every table (downgrade base): it runs only' >&2; \
+		echo 'with APP_ENV=test against a disposable database.' >&2; \
+		exit 2; \
+	fi
+	$(UV_RUN) alembic upgrade head
+	$(UV_RUN) alembic downgrade base
+	$(UV_RUN) alembic upgrade head
+	$(UV_RUN) alembic check
 
 openapi: ## Regenerate docs/api/openapi.json
 	$(UV_RUN) python -m scripts.export_openapi
@@ -88,6 +120,12 @@ migration: ## Autogenerate a migration: make migration name="add users"; then re
 
 downgrade: ## Revert the latest migration (alembic downgrade -1)
 	$(UV_RUN) alembic downgrade -1
+
+image: ## Build the API image (labelled with VCS_REF) and check it runs as non-root
+	docker build --build-arg VCS_REF=$(VCS_REF) -t $(IMAGE) .
+	@uid=$$(docker run --rm --entrypoint id $(IMAGE) -u); \
+	if [ "$$uid" != "$(APP_UID)" ]; then echo "image runs as uid $$uid, expected $(APP_UID)" >&2; exit 1; fi
+	docker run --rm --entrypoint python $(IMAGE) -c 'import app.main'
 
 .env:
 	cp .env.example .env

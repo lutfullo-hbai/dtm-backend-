@@ -1,0 +1,173 @@
+# Backend CI: every pull request into, and every push to, dev, staging and main.
+#
+# Required status checks for the branch rulesets (configured by the repository owner;
+# the names below are the job names and must not change without updating the rulesets):
+#   lint, typecheck, test, migrations, build
+#
+# Order (plan, "CI tartibi"): lint and typecheck run first, in parallel; test and
+# migrations need both; build needs test and migrations. A failing static check
+# therefore stops the slower jobs. Each job runs a Makefile target, so a local
+# `make <target>` executes exactly what CI executes.
+#
+# GitHub-hosted runners only (never self-hosted: a PR's code must not run on the
+# server). Third-party actions are pinned to a full commit SHA; the comment is its tag.
+# No image is pushed here: publishing to GHCR is CD (M0-11).
+#
+# Deferred from the plan's CI order: the contract tests (schemathesis) and the oasdiff
+# breaking-change check of docs/api/openapi.json. Both need something M0 does not have
+# yet: a released openapi.json to compare against, and business endpoints under /api/v1
+# worth fuzzing (M2-M3). Until then `make openapi-check` only proves the committed
+# document matches the code.
+
+name: ci
+
+on:
+  pull_request:
+    branches: [dev, staging, main]
+    # `edited`: a corrected PR title (the squash-merge subject) is checked again.
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [dev, staging, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # A new push to a PR supersedes the running check; branch pushes always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The same uv as the Dockerfile's builder stage; Python comes from .python-version.
+  UV_VERSION: "0.12.18"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: commit messages are checked over the PR's whole range.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - name: ruff, import contracts, vulture, file length, noqa, module inits
+        run: make ci-lint
+      - name: Commit messages of the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: uv run --frozen cz check -l 72 --rev-range "${BASE_SHA}..${HEAD_SHA}"
+      # GitHub appends " (#N)" to the title when it squash-merges, so the title gets
+      # 72 minus that suffix. Title and number reach the shell only as env variables
+      # (never interpolated into the script), so a crafted title cannot inject code.
+      - name: Pull request title (the squash-merge subject)
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          suffix=" (#${PR_NUMBER})"
+          uv run --frozen cz check -l "$((72 - ${#suffix}))" --message "${PR_TITLE}"
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - name: mypy --strict
+        run: make typecheck
+
+  test:
+    name: test
+    needs: [lint, typecheck]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      # Unit, integration and API tests against real PostgreSQL and Redis containers
+      # (testcontainers, the images pinned in tests/conftest.py), with the coverage
+      # floor. Ryuk stays disabled: the fixtures stop their containers, and the runner
+      # VM is discarded after the job anyway.
+      - name: pytest with coverage
+        run: make test
+
+  migrations:
+    name: migrations
+    needs: [lint, typecheck]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      # Must equal DEFAULT_POSTGRES_IMAGE in tests/conftest.py (and compose.yaml);
+      # tests/unit/test_ci_workflow.py fails if they differ.
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: dtm
+          POSTGRES_PASSWORD: dtm # throwaway CI database, never a real secret
+          POSTGRES_DB: dtm_ci
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U dtm -d dtm_ci"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://dtm:dtm@127.0.0.1:5432/dtm_ci
+      # Required by Settings, never connected to by migrations.
+      REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - name: Migration history (pytest-alembic)
+        run: make test-migrations
+      - name: alembic upgrade, downgrade, upgrade, check
+        run: make migrations-roundtrip
+      - name: OpenAPI document is current
+        run: make openapi-check
+
+  build:
+    name: build
+    needs: [test, migrations]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: docker build (not pushed), non-root and import smoke check
+        run: make image VCS_REF="${GITHUB_SHA}"
