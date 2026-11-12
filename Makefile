@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 UV_RUN := uv run --frozen
-PY_PATHS := app tests scripts
+PY_PATHS := app tests scripts migrations
 # The rule is "noqa only with a reason". Matched case-insensitively, this finds a line
 # or file-level (`# ruff: noqa`, `# flake8: noqa`) suppression whose codes are followed
 # by nothing, or by an empty `#` comment.
@@ -13,7 +13,8 @@ NOQA_WITHOUT_REASON := \#[[:space:]]*((ruff|flake8)[[:space:]]*:[[:space:]]*)?no
 # let other modules reach its repository or models without import-linter noticing.
 MODULE_INITS_DIR := app/modules
 
-.PHONY: help install lint noqa-check module-init-check format typecheck test openapi openapi-check
+.PHONY: help install lint noqa-check module-init-check format typecheck test openapi openapi-check \
+	migrate migration downgrade
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -47,7 +48,7 @@ format: ## Apply ruff fixes and formatting
 	$(UV_RUN) ruff check --fix $(PY_PATHS)
 	$(UV_RUN) ruff format $(PY_PATHS)
 
-typecheck: ## mypy --strict over app, tests and scripts
+typecheck: ## mypy --strict over app, tests, scripts and migrations
 	$(UV_RUN) mypy
 
 test: ## Run the test suite
@@ -58,3 +59,14 @@ openapi: ## Regenerate docs/api/openapi.json
 
 openapi-check: ## Fail if docs/api/openapi.json is stale
 	$(UV_RUN) python -m scripts.export_openapi --check
+
+# Migrations run as a one-off process against DATABASE_URL (the app never migrates).
+migrate: ## Apply all migrations (alembic upgrade head)
+	$(UV_RUN) alembic upgrade head
+
+migration: ## Autogenerate a migration: make migration name="add users"; then review it
+	@if [ -z "$(name)" ]; then echo 'usage: make migration name="short description"' >&2; exit 2; fi
+	$(UV_RUN) alembic revision --autogenerate -m "$(name)"
+
+downgrade: ## Revert the latest migration (alembic downgrade -1)
+	$(UV_RUN) alembic downgrade -1

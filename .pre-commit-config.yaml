@@ -1,6 +1,6 @@
 # The pre-commit hook runs `make lint`, the same target CI runs, over the same paths
-# (app, tests, scripts), so a hook and CI can never disagree about which checks run,
-# which files they see, or which tool version is used (all via `uv run --frozen`).
+# (app, tests, scripts, migrations), so a hook and CI can never disagree about which
+# checks run, which files they see, or which tool version is used (`uv run --frozen`).
 # pre-commit stashes unstaged changes first, so the checks see what is being committed;
 # untracked files are still on disk and are checked too. Install with:
 #   uv run pre-commit install

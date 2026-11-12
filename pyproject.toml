@@ -106,13 +106,19 @@ max-statements = 50
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
 
+# Models must get relationships through app.core.db, which defaults to lazy="raise".
+# The wrapper in app/core/db/base.py is the one place allowed to use the originals.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"sqlalchemy.orm.relationship".msg = "Use app.core.db.relationship (defaults to lazy='raise')."
+"sqlalchemy.orm.backref".msg = "Use app.core.db.relationship with back_populates instead."
+
 [tool.ruff.format]
 line-ending = "lf"
 
 [tool.mypy]
 python_version = "3.13"
 strict = true
-files = ["app", "tests", "scripts"]
+files = ["app", "tests", "scripts", "migrations"]
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined"]
 plugins = ["pydantic.mypy"]
@@ -195,15 +201,27 @@ allow_indirect_imports = true
 [tool.vulture]
 # vulture_whitelist.py holds names that are used only by a framework (ORM columns,
 # pydantic fields read during serialization); see the convention in that file.
-paths = ["app", "tests", "scripts", "vulture_whitelist.py"]
+paths = ["app", "tests", "scripts", "migrations", "vulture_whitelist.py"]
 # 60 is the level at which vulture reports unused functions, classes and methods.
 min_confidence = 60
 # Called by the framework, not by our code: route handlers, pydantic validators and
 # pytest fixtures (injected by name, autouse ones are never referenced at all).
 ignore_decorators = ["@router.*", "@field_validator", "@model_validator", "@pytest.fixture"]
 # pydantic reads model_config and calls settings_customise_sources; vulture flags the
-# conventional `cls` of classmethod validators.
-ignore_names = ["model_config", "settings_customise_sources", "cls"]
+# conventional `cls` of classmethod validators. Alembic reads a revision's identifiers
+# and calls its upgrade/downgrade; SQLAlchemy reads the base's type_annotation_map.
+ignore_names = [
+    "model_config",
+    "settings_customise_sources",
+    "cls",
+    "revision",
+    "down_revision",
+    "branch_labels",
+    "depends_on",
+    "upgrade",
+    "downgrade",
+    "type_annotation_map",
+]
 
 [tool.commitizen]
 # Custom rules: the plan allows exactly feat, fix, refactor, perf, test, docs, ci, chore.

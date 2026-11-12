@@ -6,7 +6,7 @@ from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontext
 from fastapi import FastAPI
 
 from app.core.config import Settings, get_settings
-from app.core.db import create_engine
+from app.core.db import create_engine, create_session_factory
 from app.core.errors import register_error_handlers
 from app.core.redis import create_redis_client
 from app.modules.health.repository import HealthRepository
@@ -28,6 +28,7 @@ def _build_lifespan(
         async with AsyncExitStack() as stack:
             engine = create_engine(settings)
             stack.push_async_callback(engine.dispose)
+            app.state.session_factory = create_session_factory(engine)
             redis = create_redis_client(settings)
             stack.push_async_callback(redis.aclose)
             repository = HealthRepository(engine, redis)
