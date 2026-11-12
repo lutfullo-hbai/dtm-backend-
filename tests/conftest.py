@@ -38,6 +38,8 @@ from testcontainers.core.config import testcontainers_config
 from testcontainers.core.container import DockerContainer
 
 from app.core.config import Settings
+from app.core.logging import configure_logging
+from tests.support.logs import LogReader
 from tests.support.query_counter import QueryCounter, assert_max_queries
 
 POSTGRES_IMAGE = os.environ.get("TEST_POSTGRES_IMAGE", "postgres:18")
@@ -209,3 +211,10 @@ def test_settings(database_url: str, redis_url: str) -> Settings:
 def assert_max_queries_fixture() -> Callable[[int], AbstractContextManager[QueryCounter]]:
     """`with assert_max_queries(n): ...` fails if the block sends more than n statements."""
     return assert_max_queries
+
+
+@pytest.fixture
+def logs(capsys: pytest.CaptureFixture[str]) -> LogReader:
+    """JSON logging at INFO to stdout, read back line by line, as production writes it."""
+    configure_logging("INFO", "json")
+    return LogReader(capsys)

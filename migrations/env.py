@@ -13,11 +13,18 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.core.config import get_settings
 from app.core.db import Base
+from app.core.logging import configure_logging
 
 config = context.config
-# Tests drive migrations with their own logging; only the CLI applies alembic.ini's.
+# Tests drive migrations with their own logging; only the CLI configures it. Online
+# runs log like the application (structured, stdout). Offline runs (`--sql`) print the
+# SQL itself to stdout, so their log lines go to stderr as alembic.ini describes.
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):
-    fileConfig(config.config_file_name, disable_existing_loggers=False)
+    if context.is_offline_mode():
+        fileConfig(config.config_file_name, disable_existing_loggers=False)
+    else:
+        settings = get_settings()
+        configure_logging(settings.log_level, settings.log_format)
 
 target_metadata = Base.metadata
 

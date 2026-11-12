@@ -17,6 +17,101 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "NotReadyProblem": {
+        "description": "Problem body returned when at least one dependency is unavailable.",
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ReadinessChecks",
+            "description": "Per-dependency results."
+          },
+          "code": {
+            "description": "Stable, machine-readable snake_case error key.",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "description": "Human-readable explanation of this occurrence.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Correlation id, also sent as X-Request-ID.",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "HTTP status code.",
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "Short, human-readable summary of the problem type.",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "URI reference identifying the problem type.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "request_id",
+          "checks"
+        ],
+        "title": "NotReadyProblem",
+        "type": "object"
+      },
+      "ProblemDetails": {
+        "description": "RFC 9457 problem body shared by every error response.",
+        "properties": {
+          "code": {
+            "description": "Stable, machine-readable snake_case error key.",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "description": "Human-readable explanation of this occurrence.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Correlation id, also sent as X-Request-ID.",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "HTTP status code.",
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "Short, human-readable summary of the problem type.",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "URI reference identifying the problem type.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "request_id"
+        ],
+        "title": "ProblemDetails",
+        "type": "object"
+      },
       "ReadinessChecks": {
         "description": "Per-dependency readiness results.",
         "properties": {
@@ -65,6 +160,97 @@
         ],
         "title": "ReadinessResponse",
         "type": "object"
+      },
+      "ValidationErrorItem": {
+        "description": "One invalid input. The rejected value itself is never echoed back.",
+        "properties": {
+          "loc": {
+            "description": "Path to the input, e.g. [\"query\", \"limit\"].",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "message": {
+            "description": "Human-readable reason.",
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "description": "Stable machine-readable error type, e.g. `int_parsing`.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "message",
+          "type"
+        ],
+        "title": "ValidationErrorItem",
+        "type": "object"
+      },
+      "ValidationProblem": {
+        "description": "Problem body for 422 `validation_error`.",
+        "properties": {
+          "code": {
+            "description": "Stable, machine-readable snake_case error key.",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "description": "Human-readable explanation of this occurrence.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "errors": {
+            "description": "Every invalid input.",
+            "items": {
+              "$ref": "#/components/schemas/ValidationErrorItem"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "request_id": {
+            "description": "Correlation id, also sent as X-Request-ID.",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "HTTP status code.",
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "Short, human-readable summary of the problem type.",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "URI reference identifying the problem type.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "request_id",
+          "errors"
+        ],
+        "title": "ValidationProblem",
+        "type": "object"
       }
     }
   },
@@ -91,6 +277,24 @@
               }
             },
             "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "internal_error",
+                  "detail": "An unexpected error occurred. Quote the request id when reporting it.",
+                  "request_id": "0190f3c2-7b1e-7c4a-9d2f-3a1b2c3d4e5f",
+                  "status": 500,
+                  "title": "Internal Server Error",
+                  "type": "/problems/internal-error"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unexpected server error; the cause is only logged."
           }
         },
         "summary": "Liveness probe",
@@ -121,6 +325,24 @@
             },
             "description": "Successful Response"
           },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "internal_error",
+                  "detail": "An unexpected error occurred. Quote the request id when reporting it.",
+                  "request_id": "0190f3c2-7b1e-7c4a-9d2f-3a1b2c3d4e5f",
+                  "status": 500,
+                  "title": "Internal Server Error",
+                  "type": "/problems/internal-error"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unexpected server error; the cause is only logged."
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -137,62 +359,7 @@
                   "type": "/problems/not-ready"
                 },
                 "schema": {
-                  "description": "Problem body returned when at least one dependency is unavailable.",
-                  "properties": {
-                    "checks": {
-                      "additionalProperties": {
-                        "enum": [
-                          "ok",
-                          "unavailable"
-                        ],
-                        "type": "string"
-                      },
-                      "description": "Per-dependency results, keyed `database` and `redis`.",
-                      "title": "Checks",
-                      "type": "object"
-                    },
-                    "code": {
-                      "description": "Stable, machine-readable snake_case error key.",
-                      "title": "Code",
-                      "type": "string"
-                    },
-                    "detail": {
-                      "description": "Human-readable explanation of this occurrence.",
-                      "title": "Detail",
-                      "type": "string"
-                    },
-                    "request_id": {
-                      "description": "Correlation id, also sent as X-Request-ID.",
-                      "title": "Request Id",
-                      "type": "string"
-                    },
-                    "status": {
-                      "description": "HTTP status code.",
-                      "title": "Status",
-                      "type": "integer"
-                    },
-                    "title": {
-                      "description": "Short, human-readable summary of the problem type.",
-                      "title": "Title",
-                      "type": "string"
-                    },
-                    "type": {
-                      "description": "URI reference identifying the problem type.",
-                      "title": "Type",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail",
-                    "code",
-                    "request_id",
-                    "checks"
-                  ],
-                  "title": "NotReadyProblem",
-                  "type": "object"
+                  "$ref": "#/components/schemas/NotReadyProblem"
                 }
               }
             },

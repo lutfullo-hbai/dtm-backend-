@@ -5,14 +5,14 @@ themselves live in the repository and are injected as plain callables.
 """
 
 import asyncio
-import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from app.core.errors import AppError
+from app.core.logging import get_logger
 from app.modules.health.schemas import CheckStatus
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 Probe = Callable[[], Awaitable[None]]
 NOT_READY_DETAIL = "One or more dependencies are unavailable."
@@ -123,7 +123,7 @@ class ReadinessService:
             async with asyncio.timeout(self._drain_timeout_seconds):
                 await asyncio.gather(*pending, return_exceptions=True)
         except TimeoutError:
-            logger.warning("readiness probes still running at shutdown: %d", len(pending))
+            logger.warning("readiness_probes_still_running", count=len(pending))
         # Done-callbacks may not have run yet; drop finished tasks deterministically.
         self._abandoned = {task for task in self._abandoned if not task.done()}
 
@@ -155,7 +155,9 @@ class ReadinessService:
     def _result(self, name: str, task: asyncio.Task[CheckStatus]) -> CheckStatus:
         if task.done():
             return task.result()
-        logger.warning("readiness check timed out: %s after %ss", name, self._timeout_seconds)
+        logger.warning(
+            "readiness_check_timed_out", dependency=name, timeout_seconds=self._timeout_seconds
+        )
         self._abandon(task)
         return "unavailable"
 
@@ -173,6 +175,6 @@ class ReadinessService:
         except Exception:
             # Any failure (refused, auth, protocol) means "not ready"; the cause is
             # logged here and deliberately kept out of the HTTP response.
-            logger.warning("readiness check failed: %s", name, exc_info=True)
+            logger.warning("readiness_check_failed", dependency=name, exc_info=True)
             return "unavailable"
         return "ok"

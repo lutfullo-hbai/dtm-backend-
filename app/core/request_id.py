@@ -1,8 +1,9 @@
 """Request correlation id: header name and resolution rule.
 
-From M0-08 a middleware resolves the id once per request, stores it on
-`request.state.request_id` and sets the response header; until then error
-handlers resolve it themselves with the same rule.
+`RequestContextMiddleware` (app.core.middleware) resolves the id once per request,
+stores it on `request.state.request_id` and sets the response header. Error
+handlers read it with `current_request_id`, which falls back to the same rule
+only when no middleware ran (a handler called directly).
 """
 
 import re

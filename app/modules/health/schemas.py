@@ -32,6 +32,4 @@ class ReadinessResponse(BaseModel):
 class NotReadyProblem(ProblemDetails):
     """Problem body returned when at least one dependency is unavailable."""
 
-    checks: dict[str, CheckStatus] = Field(
-        description="Per-dependency results, keyed `database` and `redis`."
-    )
+    checks: ReadinessChecks = Field(description="Per-dependency results.")

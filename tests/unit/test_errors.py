@@ -4,17 +4,17 @@ import json
 from typing import ClassVar
 
 import pytest
-from pydantic import BaseModel, create_model
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.core.errors import (
     AppError,
     ProblemDetails,
-    handle_app_error,
     problem_openapi_response,
     problem_response,
     problem_type,
 )
+from app.core.errors.handlers import handle_app_error, handle_http_exception
 
 
 class _ConflictError(AppError):
@@ -93,21 +93,26 @@ async def test_handler_falls_back_to_the_incoming_header() -> None:
     assert _body(response.body)["request_id"] == "abc-1"
 
 
-class _Inner(BaseModel):
-    value: int
-
-
-def test_problem_openapi_response_rejects_nested_models() -> None:
-    nested = create_model("NestedProblem", __base__=ProblemDetails, inner=(_Inner, ...))
-
-    with pytest.raises(TypeError, match="NestedProblem must not contain nested models"):
-        problem_openapi_response(nested, "nested", {})
-
-
 def test_problem_openapi_response_documents_problem_media_type() -> None:
     described = problem_openapi_response(ProblemDetails, "A problem.", {"code": "x"})
 
-    content = described["content"]["application/problem+json"]
+    assert described["model"] is ProblemDetails
     assert described["description"] == "A problem."
-    assert content["example"] == {"code": "x"}
-    assert content["schema"]["title"] == "ProblemDetails"
+    assert described["content"] == {"application/problem+json": {"example": {"code": "x"}}}
+
+
+@pytest.mark.parametrize("detail", [{"field": "x"}, ["a", "b"], 7, ""])
+async def test_non_string_or_empty_http_detail_becomes_the_status_phrase(detail: object) -> None:
+    error = HTTPException(400, detail=detail)
+
+    response = await handle_http_exception(_request({"X-Request-ID": "r"}), error)
+
+    assert _body(response.body)["detail"] == "Bad Request"
+
+
+async def test_string_http_detail_is_kept() -> None:
+    error = HTTPException(400, detail="Cursor is malformed.")
+
+    response = await handle_http_exception(_request({"X-Request-ID": "r"}), error)
+
+    assert _body(response.body)["detail"] == "Cursor is malformed."

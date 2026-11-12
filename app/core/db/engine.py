@@ -19,6 +19,12 @@ def create_engine(settings: Settings) -> AsyncEngine:
         max_overflow=settings.db_max_overflow,
         pool_timeout=settings.db_pool_timeout_seconds,
         pool_pre_ping=True,
+        # Bound parameters may carry personal data: this keeps SQLAlchemy's own
+        # "[parameters: ...]" out of exception messages. It does not touch the driver's
+        # or the server's message: asyncpg quotes a rejected value ("invalid input for
+        # query argument $1: '...'"), PostgreSQL quotes an uncastable one and repeats a
+        # violating row in DETAIL; app.core.logging redacts both in every log line.
+        hide_parameters=True,
         connect_args={
             "server_settings": {"statement_timeout": str(settings.db_statement_timeout_ms)},
         },

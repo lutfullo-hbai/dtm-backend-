@@ -89,3 +89,19 @@ async def test_writes_through_the_apps_session_factory_stay_in_the_test(
         assert await _probe_rows(session) == 1
 
     assert await _probe_rows(database_url) == 0
+
+
+async def test_failed_request_rolls_back_its_writes(
+    app: FastAPI, client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    async def write_then_fail(session: Annotated[AsyncSession, Depends(get_session)]) -> None:
+        await session.execute(_INSERT_PROBE, {"probe": _PROBE})
+        msg = "handler failed after writing"
+        raise RuntimeError(msg)
+
+    app.add_api_route("/test-fail", write_then_fail, methods=["POST"])
+
+    response = await client.post("/test-fail")
+
+    assert response.status_code == 500
+    assert await _probe_rows(db_session) == 0
