@@ -1,0 +1,14 @@
+# Allow-list: the image needs only these (see Dockerfile COPY lines).
+*
+!pyproject.toml
+!uv.lock
+!.python-version
+!alembic.ini
+!app/
+!migrations/
+
+# Never ship local state, even inside allowed directories.
+**/__pycache__
+**/*.py[cod]
+**/.env
+**/.env.*

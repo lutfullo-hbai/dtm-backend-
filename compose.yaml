@@ -1,0 +1,116 @@
+# LOCAL DEVELOPMENT ONLY. Not used for staging or production (those live in the
+# infra repository). Start with `make up`; it creates .env from .env.example if missing.
+#
+# Values come from .env: compose reads it for ${...} below, and api/migrate also get
+# it as their environment. Inside the network the app reaches the services by name,
+# so DATABASE_URL and REDIS_URL are overridden here; the ones in .env point at the
+# ports published on 127.0.0.1 for tools run on the host (make migrate, make test).
+#
+# Image tags: tests/conftest.py starts the same PostgreSQL and Redis images, and
+# tests/unit/test_compose.py fails if the two ever differ.
+
+name: dtm
+
+# migrate and api run the same image. Only api declares `build:`, so the image is
+# built once per `up`; migrate never builds or pulls it. `docker compose up` builds
+# every image before it creates any container, so the image exists when migrate
+# starts (make up and make migrate-docker build it explicitly first anyway).
+x-app: &app
+  image: dtm-backend:local
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?copy .env.example to .env}:${POSTGRES_PASSWORD:?copy .env.example to .env}@postgres:5432/${POSTGRES_DB:?copy .env.example to .env}
+    REDIS_URL: redis://redis:6379/0
+    # Containers log like production: one JSON object per line.
+    LOG_FORMAT: json
+  networks: [backend]
+
+services:
+  # One-off: applies migrations, then exits. The app never migrates at startup.
+  migrate:
+    <<: *app
+    pull_policy: never
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits: {memory: 256m}
+
+  api:
+    <<: *app
+    build:
+      context: .
+      args:
+        VCS_REF: ${VCS_REF:-unknown}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-8000}:8000"
+    deploy:
+      resources:
+        limits: {memory: 256m, cpus: "1"}
+
+  postgres:
+    image: postgres:18.6
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?copy .env.example to .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env}
+      POSTGRES_DB: ${POSTGRES_DB:?copy .env.example to .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      # PostgreSQL 18 images keep data in a versioned subdirectory of this path.
+      - postgres-data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
+    networks: [backend]
+    deploy:
+      resources:
+        limits: {memory: 512m}
+
+  redis:
+    image: redis:8.10.3
+    restart: unless-stopped
+    # noeviction: at the memory limit writes fail loudly instead of Redis silently
+    # dropping keys; future idempotency keys and rate-limit counters must not vanish.
+    # Local data is disposable, so nothing is persisted to disk.
+    command:
+      - redis-server
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-56379}:6379"
+    networks: [backend]
+    deploy:
+      resources:
+        limits: {memory: 128m}
+
+volumes:
+  postgres-data:
+
+networks:
+  backend:

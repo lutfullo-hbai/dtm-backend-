@@ -12,9 +12,13 @@ NOQA_WITHOUT_REASON := \#[[:space:]]*((ruff|flake8)[[:space:]]*:[[:space:]]*)?no
 # A feature module's __init__.py must stay empty of imports: a re-export there would
 # let other modules reach its repository or models without import-linter noticing.
 MODULE_INITS_DIR := app/modules
+# Local compose stack (compose.yaml); the image is labelled with the current commit.
+COMPOSE := VCS_REF=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown) docker compose
+READY_TIMEOUT_SECONDS := 60
 
 .PHONY: help install lint noqa-check module-init-check format typecheck test test-unit \
-	test-integration test-clean openapi openapi-check migrate migration downgrade
+	test-integration test-clean openapi openapi-check migrate migration downgrade \
+	up down logs ps migrate-docker
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -84,3 +88,38 @@ migration: ## Autogenerate a migration: make migration name="add users"; then re
 
 downgrade: ## Revert the latest migration (alembic downgrade -1)
 	$(UV_RUN) alembic downgrade -1
+
+.env:
+	cp .env.example .env
+	@echo 'Created .env from .env.example (local-only placeholder values).'
+
+# In order: dependencies healthy -> migrations applied -> API started. compose runs the
+# one-off `migrate` before `api` (depends_on: service_completed_successfully) and fails
+# if it fails; its exited container stays, so `docker compose restart api` still works.
+up: .env ## Build and start the local stack; wait until /ready answers 200
+	$(COMPOSE) build
+	$(COMPOSE) up -d --wait postgres redis
+	$(COMPOSE) up -d api || { $(COMPOSE) logs --no-log-prefix migrate >&2; \
+		echo 'migrations failed (see above)' >&2; exit 1; }
+	@port=$$(sed -n 's/^API_HOST_PORT=//p' .env); url="http://127.0.0.1:$${port:-8000}"; \
+	deadline=$$(( $$(date +%s) + $(READY_TIMEOUT_SECONDS) )); \
+	until curl -fs -o /dev/null "$$url/ready"; do \
+		if [ "$$(date +%s)" -ge "$$deadline" ]; then \
+			echo "API not ready after $(READY_TIMEOUT_SECONDS)s; see: make logs" >&2; exit 1; \
+		fi; \
+		sleep 1; \
+	done; \
+	echo "API ready: $$url (docs: $$url/docs)"
+
+down: ## Stop and remove the local stack's containers (the database volume is kept)
+	$(COMPOSE) down
+
+logs: ## Follow the local stack's logs
+	$(COMPOSE) logs -f
+
+ps: ## Show the local stack's containers
+	$(COMPOSE) ps -a
+
+migrate-docker: .env ## Apply migrations in the local stack (one-off container)
+	$(COMPOSE) build
+	$(COMPOSE) run --rm migrate

@@ -4,8 +4,9 @@ The database is never mocked. Integration tests run against containers started o
 per session (testcontainers); the schema comes from `alembic upgrade head`, exactly
 as in production, never from `create_all()`.
 
-Container images are defined here and nowhere else in the test suite. CI and compose
-pin the same tags; override with TEST_POSTGRES_IMAGE / TEST_REDIS_IMAGE.
+Container images are defined here and nowhere else in the test suite. compose.yaml
+pins the same tags (tests/unit/test_compose.py fails if they differ), and CI uses
+these defaults; override with TEST_POSTGRES_IMAGE / TEST_REDIS_IMAGE.
 
 Exposure: container ports are published on 127.0.0.1 only (a local Docker daemon is
 assumed), and testcontainers' Ryuk reaper is disabled by default, because it mounts
@@ -42,8 +43,10 @@ from app.core.logging import configure_logging
 from tests.support.logs import LogReader
 from tests.support.query_counter import QueryCounter, assert_max_queries
 
-POSTGRES_IMAGE = os.environ.get("TEST_POSTGRES_IMAGE", "postgres:18")
-REDIS_IMAGE = os.environ.get("TEST_REDIS_IMAGE", "redis:8")
+DEFAULT_POSTGRES_IMAGE = "postgres:18.6"
+DEFAULT_REDIS_IMAGE = "redis:8.10.3"
+POSTGRES_IMAGE = os.environ.get("TEST_POSTGRES_IMAGE", DEFAULT_POSTGRES_IMAGE)
+REDIS_IMAGE = os.environ.get("TEST_REDIS_IMAGE", DEFAULT_REDIS_IMAGE)
 
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 POSTGRES_USER = "dtm"
