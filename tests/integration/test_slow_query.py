@@ -7,7 +7,7 @@ so whether a statement counts as slow never depends on how fast the machine is.
 from collections.abc import AsyncIterator
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import make_url, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -118,10 +118,12 @@ async def test_failed_statement_does_not_leave_its_start_time_behind(
     assert statements == ["SELECT * FROM missing_table", "SELECT 2"]
 
 
-async def test_connection_failure_is_ignored(logs: LogReader) -> None:
-    engine = await _engine("postgresql+asyncpg://dtm:dtm@127.0.0.1:1/dtm", _ALWAYS)
+async def test_connection_failure_is_ignored(database_url: str, logs: LogReader) -> None:
+    """A rejected login is a database error, but no statement ran: nothing to time."""
+    wrong_password = make_url(database_url).set(password="not-the-password")
+    engine = await _engine(wrong_password.render_as_string(hide_password=False), _ALWAYS)
     try:
-        with pytest.raises(OSError, match="Connect call failed"):
+        with pytest.raises(DBAPIError, match="password authentication failed"):
             await engine.connect().start()
     finally:
         await engine.dispose()
