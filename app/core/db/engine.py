@@ -23,7 +23,7 @@ def create_engine(settings: Settings) -> AsyncEngine:
         # "[parameters: ...]" out of exception messages. It does not touch the driver's
         # or the server's message: asyncpg quotes a rejected value ("invalid input for
         # query argument $1: '...'"), PostgreSQL quotes an uncastable one and repeats a
-        # violating row in DETAIL; app.core.logging redacts both in every log line.
+        # violating row in DETAIL; app.core.log_redaction withholds those messages.
         hide_parameters=True,
         connect_args={
             "server_settings": {"statement_timeout": str(settings.db_statement_timeout_ms)},

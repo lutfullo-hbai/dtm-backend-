@@ -13,6 +13,8 @@ Convention (min_confidence 60 reports unused class attributes):
 This file is parsed by vulture only; it is never imported or executed.
 """
 
+_._str  # app/core/log_redaction.py: traceback.TracebackException message, read by its format()
+_.__notes__  # app/core/log_redaction.py: traceback.TracebackException notes, read by its format()
 _.disabled  # app/core/logging.py: logging.Logger attribute, read by the stdlib on every record
 _.loc  # app/core/errors/problem.py: pydantic field of ValidationErrorItem, read for the OpenAPI schema
 _.ryuk_disabled  # tests/conftest.py: testcontainers config attribute, read when a container starts

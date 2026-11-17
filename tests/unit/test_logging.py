@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 import structlog
+from sqlalchemy.exc import StatementError
 
 from app.core.config import LogFormat
 from app.core.logging import configure_logging, get_logger
@@ -136,31 +137,68 @@ def test_console_traceback_never_shows_local_variables(
 
 
 _ASYNCPG_MESSAGE = (
-    "<class 'asyncpg.exceptions.DataError'>: invalid input for query argument $1: "
+    "invalid input for query argument $1: "
     "'Pers0nalValue' (invalid UUID 'Pers0nalValue': length must be between 32..36)"
 )
+_WITHHELD = "<message withheld: database error>"
+
+
+def _statement_error_from_codec() -> StatementError:
+    """A statement error raised from a codec error, as SQLAlchemy chains asyncpg's."""
+    try:
+        msg = "invalid UUID 'Pers0nalValue': length must be between 32..36"
+        raise ValueError(msg)  # the codec's own error, which asyncpg chains
+    except ValueError as codec_error:
+        return StatementError(_ASYNCPG_MESSAGE, "SELECT $1", None, codec_error)
 
 
 @pytest.mark.parametrize("log_format", ["json", "console"])
-def test_values_quoted_by_asyncpg_are_redacted(
+def test_database_error_messages_and_their_origins_are_withheld(
     capsys: pytest.CaptureFixture[str], log_format: LogFormat
 ) -> None:
     configure_logging("INFO", log_format)
-    logger = get_logger("app.test")
+    error = _statement_error_from_codec()
 
-    logger.error(_ASYNCPG_MESSAGE)
     try:
-        try:
-            msg = "invalid UUID 'Pers0nalValue': length must be between 32..36"
-            raise ValueError(msg)  # the codec's own error, which asyncpg chains
-        except ValueError as codec_error:
-            raise RuntimeError(_ASYNCPG_MESSAGE) from codec_error
-    except RuntimeError:
+        raise error from error.orig
+    except StatementError:
         logging.getLogger("sqlalchemy.x").exception("query failed")
 
     out = capsys.readouterr().out
     assert "Pers0nalValue" not in out
-    assert out.count("query argument $1: [REDACTED]") == 2
+    assert f"StatementError: {_WITHHELD}" in out  # the types and frames stay
+    assert f"ValueError: {_WITHHELD}" in out
+
+
+def test_database_error_inside_an_exception_group_is_withheld(logs: LogReader) -> None:
+    try:
+        raise ExceptionGroup("tasks failed", [_statement_error_from_codec(), KeyError("kept")])
+    except ExceptionGroup:
+        get_logger("app.test").exception("tasks_failed")
+
+    (line,) = logs.lines()
+    assert "Pers0nalValue" not in line["exception"]
+    assert f"StatementError: {_WITHHELD}" in line["exception"]
+    assert "KeyError: 'kept'" in line["exception"]  # other members keep their message
+
+
+def test_quoted_values_in_plain_and_nested_strings_are_redacted(logs: LogReader) -> None:
+    get_logger("app.test").error(_ASYNCPG_MESSAGE, ctx={"items": [(_ASYNCPG_MESSAGE,)]})
+
+    (line,) = logs.lines()
+    assert line["event"] == "invalid input for query argument $1: [REDACTED]"
+    assert line["ctx"] == {"items": [["invalid input for query argument $1: [REDACTED]"]]}
+
+
+def test_deeply_nested_values_are_replaced_not_rendered(logs: LogReader) -> None:
+    nested: list[object] = [_ASYNCPG_MESSAGE]
+    for _ in range(20):
+        nested = [nested]
+
+    get_logger("app.test").error("deep", nested=nested)
+
+    (line,) = logs.lines()
+    assert "Pers0nalValue" not in str(line["nested"])
 
 
 def test_uvicorn_loggers_follow_log_level(logs: LogReader) -> None:

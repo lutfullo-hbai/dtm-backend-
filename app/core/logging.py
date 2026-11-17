@@ -19,7 +19,8 @@ Tracebacks are rendered as plain text in both formats, never with local variable
 the locals of a request's frames include the ASGI scope (headers, Authorization,
 query string).
 
-Database values are kept out of every line by app.core.log_redaction.
+Database errors and values are kept out of every line by app.core.log_redaction
+(read its rule for application code before logging a database error).
 """
 
 import logging
