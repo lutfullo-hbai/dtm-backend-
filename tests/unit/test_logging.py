@@ -201,6 +201,22 @@ def test_deeply_nested_values_are_replaced_not_rendered(logs: LogReader) -> None
     assert "Pers0nalValue" not in str(line["nested"])
 
 
+def test_access_log_stays_off_when_a_handler_is_attached_again(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging("INFO", "json")
+    access = logging.getLogger("uvicorn.access")
+    handler = logging.StreamHandler()  # uvicorn's own config re-attaching its handler
+    access.addHandler(handler)
+    try:
+        access.warning('127.0.0.1 - "GET /x?token=secret HTTP/1.1" 500')
+    finally:
+        access.removeHandler(handler)
+
+    captured = capsys.readouterr()
+    assert "token=secret" not in captured.out + captured.err
+
+
 def test_uvicorn_loggers_follow_log_level(logs: LogReader) -> None:
     # uvicorn's dictConfig (or --log-level) pins its loggers to INFO before the factory.
     for name in ("uvicorn", "uvicorn.error"):
