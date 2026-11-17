@@ -5,6 +5,7 @@ be imported below once it exists, or autogenerate will not see its tables.
 """
 
 import asyncio
+import sys
 from logging.config import fileConfig
 
 from alembic import context
@@ -13,13 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.core.config import get_settings
 from app.core.db import Base
-from app.core.logging import configure_logging
+from app.core.logging import configure_logging, get_logger
 
 config = context.config
+logger = get_logger("migrations")
 # Tests drive migrations with their own logging; only the CLI configures it. Online
 # runs log like the application (structured, stdout). Offline runs (`--sql`) print the
 # SQL itself to stdout, so their log lines go to stderr as alembic.ini describes.
+_from_cli = False
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):
+    _from_cli = True
     if context.is_offline_mode():
         fileConfig(config.config_file_name, disable_existing_loggers=False)
     else:
@@ -69,7 +73,8 @@ async def _run_async_migrations(engine: AsyncEngine) -> None:
 
 async def _run_with_own_engine() -> None:
     # NullPool: a one-off process holds one connection and must not keep it.
-    engine = create_async_engine(_database_url(), poolclass=pool.NullPool)
+    # hide_parameters: a data migration's bound values stay out of error messages.
+    engine = create_async_engine(_database_url(), poolclass=pool.NullPool, hide_parameters=True)
     try:
         await _run_async_migrations(engine)
     finally:
@@ -89,7 +94,24 @@ def run_migrations_online() -> None:
         asyncio.run(_run_with_own_engine())
 
 
+def run_migrations_online_from_cli() -> None:
+    """Run online; a failure is logged through the structured pipeline, then exit 1.
+
+    Uncaught, the error would reach the interpreter's default excepthook, which prints
+    the raw message: a constraint violation's DETAIL repeats the row's values. Logged
+    with `logger.exception`, the database error's message is withheld
+    (app.core.log_redaction) and only its type, frames and identifiers are written.
+    """
+    try:
+        run_migrations_online()
+    except Exception:
+        logger.exception("migration_failed")
+        sys.exit(1)
+
+
 if context.is_offline_mode():
     run_migrations_offline()
+elif _from_cli:
+    run_migrations_online_from_cli()
 else:
     run_migrations_online()
