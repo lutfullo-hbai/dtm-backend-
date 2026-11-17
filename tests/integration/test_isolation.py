@@ -1,6 +1,7 @@
 """Each test runs in its own transaction, rolled back afterwards, even when it commits.
 
-That holds for the test's session, the request session and the app's session factory.
+That holds for the test's session, the request session (opened by the real
+get_session) and the app's session factory.
 
 The same test runs twice; whichever runs second would see the first one's row if
 the rollback did not happen, so the result does not depend on test order. No
@@ -61,7 +62,7 @@ async def test_redis_starts_empty_for_every_test(test_settings: Settings, _run: 
         await redis.aclose()
 
 
-async def test_request_handlers_write_through_the_tests_session(
+async def test_request_writes_are_visible_to_the_test_and_nowhere_else(
     app: FastAPI, client: httpx.AsyncClient, db_session: AsyncSession, database_url: str
 ) -> None:
     async def write_probe(session: Annotated[AsyncSession, Depends(get_session)]) -> dict[str, str]:

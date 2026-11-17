@@ -1,4 +1,12 @@
-"""The request-scoped session dependency: rollback on failure, always closed."""
+"""The request-scoped session dependency: rollback on failure, always closed.
+
+A recording stand-in for the session is used here on purpose, and only for the call
+order. Against PostgreSQL the explicit rollback in get_session cannot be observed:
+closing an AsyncSession rolls back too, so a failed request's writes are discarded
+with or without it (tests/integration/test_isolation.py checks that against the real
+get_session and database). What only this test pins is that the rollback runs first,
+before the error propagates, and that a successful request is never rolled back.
+"""
 
 from typing import Annotated, Self
 
