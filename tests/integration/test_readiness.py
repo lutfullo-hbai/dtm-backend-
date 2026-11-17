@@ -58,7 +58,7 @@ async def test_ready_stays_within_its_database_budget(
 
     assert response.status_code == 200
     assert queries.statements == ["SELECT 1"]
-    # Budget (contract section 7): SELECT 1 plus at most one pre-ping = 2 round-trips.
+    # Budget (docs/conventions.md, Resource budget): SELECT 1 plus at most one pre-ping.
     assert queries.count + len(checkouts) <= 2
 
 

@@ -151,6 +151,8 @@ up/down consistency, models match the schema).
 ## Documentation
 
 - [Architecture](docs/architecture.md): system context, containers, module boundaries, cross-cutting conventions
+- [Conventions](docs/conventions.md): the binding rules for code (configuration, HTTP and error contract,
+  logging, database, resource budget, quality gates)
 - [Architecture decision records](docs/adr/README.md), including
   [0001 modular monolith](docs/adr/0001-modular-monolith.md),
   [0002 FastAPI + SQLAlchemy](docs/adr/0002-fastapi-sqlalchemy.md),
