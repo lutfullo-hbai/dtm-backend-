@@ -136,12 +136,25 @@ image: ## Build the API image (labelled with VCS_REF) and check it runs as non-r
 # In order: dependencies healthy -> migrations applied -> API started. compose runs the
 # one-off `migrate` before `api` (depends_on: service_completed_successfully) and fails
 # if it fails; its exited container stays, so `docker compose restart api` still works.
+# A failed `up -d api` is reported as a migration failure only when the migrate
+# container really exited non-zero; anything else (a taken port, say) is shown as is.
+# The URL comes from compose itself, so API_HOST_PORT set in the shell or quoted in
+# .env is honoured.
 up: .env ## Build and start the local stack; wait until /ready answers 200
 	$(COMPOSE) build
 	$(COMPOSE) up -d --wait postgres redis
-	$(COMPOSE) up -d api || { $(COMPOSE) logs --no-log-prefix migrate >&2; \
-		echo 'migrations failed (see above)' >&2; exit 1; }
-	@port=$$(sed -n 's/^API_HOST_PORT=//p' .env); url="http://127.0.0.1:$${port:-8000}"; \
+	@if ! $(COMPOSE) up -d api; then \
+		cid=$$($(COMPOSE) ps -a -q migrate); \
+		state=$$([ -n "$$cid" ] && docker inspect -f '{{.State.Status}} {{.State.ExitCode}}' "$$cid"); \
+		if [ "$${state%% *}" = "exited" ] && [ "$${state##* }" != "0" ]; then \
+			$(COMPOSE) logs --no-log-prefix migrate >&2; \
+			echo "migrations failed (exit $${state##* }; see above)" >&2; \
+		else \
+			echo 'could not start the api (see the compose output above)' >&2; \
+		fi; \
+		exit 1; \
+	fi
+	@address=$$($(COMPOSE) port api 8000); url="http://$$address"; \
 	deadline=$$(( $$(date +%s) + $(READY_TIMEOUT_SECONDS) )); \
 	until curl -fs -o /dev/null "$$url/ready"; do \
 		if [ "$$(date +%s)" -ge "$$deadline" ]; then \
