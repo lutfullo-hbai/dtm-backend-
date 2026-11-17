@@ -41,6 +41,9 @@ Redis, applies migrations in a one-off container, starts the API and waits up to
 All ports are bound to `127.0.0.1` only. Defaults (change them in `.env`): API `8000`
 (`API_HOST_PORT`), PostgreSQL `55432` (`POSTGRES_HOST_PORT`), Redis `56379` (`REDIS_HOST_PORT`).
 If a port is taken, `make up` fails; set another value in `.env` and run it again.
+`POSTGRES_PASSWORD` is inserted into the containers' `DATABASE_URL` unescaped, so a local password
+may contain only letters, digits and `-_.~`; a character such as `@`, `:` or `/` breaks the URL
+(the API then fails at startup with a misleading "host is missing").
 
 `make logs` follows the logs, `make ps` lists the containers. `make down` stops and removes the
 containers; the database volume is kept.
