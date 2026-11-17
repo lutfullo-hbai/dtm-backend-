@@ -92,13 +92,15 @@ test-clean: ## Remove leftover test containers (label org.testcontainers=true)
 # Through the alembic CLI and env.py, as the one-off migrate process runs in production.
 # Needs DATABASE_URL (and the other required settings) for a disposable database.
 # `downgrade base` drops every table: the target refuses to run unless APP_ENV=test
-# (as in CI), so a shell pointed at a real database cannot wipe it by accident.
+# (as in CI) and DATABASE_URL points at 127.0.0.1, localhost or ::1, so a shell pointed
+# at a real database cannot wipe it by accident.
 migrations-roundtrip: ## upgrade head, downgrade base, upgrade head, then alembic check
 	@if [ "$${APP_ENV:-}" != "test" ]; then \
 		echo 'migrations-roundtrip drops every table (downgrade base): it runs only' >&2; \
 		echo 'with APP_ENV=test against a disposable database.' >&2; \
 		exit 2; \
 	fi
+	@$(UV_RUN) python -m scripts.require_local_database
 	$(UV_RUN) alembic upgrade head
 	$(UV_RUN) alembic downgrade base
 	$(UV_RUN) alembic upgrade head
