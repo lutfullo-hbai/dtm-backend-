@@ -73,6 +73,18 @@ async def test_unknown_route_is_not_found() -> None:
     assert body["title"] == "Not Found"
 
 
+async def test_trailing_slash_is_not_found_and_never_redirected() -> None:
+    """Starlette would redirect to http://<Host header>/health: an open redirect."""
+    transport = httpx.ASGITransport(app=_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            "/health/", headers={"Host": "evil.example", "X-Request-ID": "rid-1"}
+        )
+
+    _assert_problem(response, 404, "not_found")
+    assert "location" not in response.headers
+
+
 async def test_wrong_method_is_method_not_allowed_and_keeps_allow() -> None:
     response = await _request("POST", "/health")
 

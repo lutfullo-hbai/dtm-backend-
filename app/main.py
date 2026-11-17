@@ -75,7 +75,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the application. Settings are validated here, so bad config fails at startup."""
     resolved = settings if settings is not None else get_settings()
     configure_logging(resolved.log_level, resolved.log_format)
-    app = _Application(title=API_TITLE, version=API_VERSION, lifespan=_build_lifespan(resolved))
+    # redirect_slashes=False: Starlette's trailing-slash redirect builds its Location
+    # from the request's Host header (an open redirect); a near-miss path is a 404.
+    app = _Application(
+        title=API_TITLE,
+        version=API_VERSION,
+        lifespan=_build_lifespan(resolved),
+        redirect_slashes=False,
+    )
     register_error_handlers(app)
     app.include_router(health_router)
     return app
