@@ -1,10 +1,13 @@
 """Per-test database isolation on the shared container, and an HTTP client for the real app.
 
 Every database access a test can cause (the test's own session, a request's session
-from `get_session`, and any session the app opens from `app.state.session_factory`)
-runs on one connection inside one outer transaction that is rolled back after the
-test. Sessions join it with `join_transaction_mode="create_savepoint"`: code under
-test may commit or roll back freely; that only ends a savepoint.
+from the real `get_session`, and any session the app opens from
+`app.state.session_factory`) runs on one connection inside one outer transaction that
+is rolled back after the test. No dependency is overridden: `get_session` itself opens
+the request's session from `app.state.session_factory`, which the `app` fixture points
+at `test_session_factory`. Sessions join the outer transaction with
+`join_transaction_mode="create_savepoint"`: code under test may commit or roll back
+freely; that only ends a savepoint.
 
 One connection means one statement at a time: a test must not run two sessions'
 queries concurrently (asyncpg would refuse).
@@ -18,7 +21,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncConnection, async_sessionmaker
 
 from app.core.config import Settings
-from app.core.db import AsyncSession, create_engine, get_session
+from app.core.db import AsyncSession, create_engine
 from app.main import create_app
 
 
@@ -49,34 +52,23 @@ def test_session_factory(db_connection: AsyncConnection) -> async_sessionmaker[A
 async def db_session(
     test_session_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[AsyncSession]:
-    """The test's session; request handlers receive this same session."""
+    """The test's own session: a request's session is another one on the same connection."""
     async with test_session_factory() as session:
         yield session
 
 
 @pytest.fixture
 async def app(
-    test_settings: Settings,
-    db_session: AsyncSession,
-    test_session_factory: async_sessionmaker[AsyncSession],
+    test_settings: Settings, test_session_factory: async_sessionmaker[AsyncSession]
 ) -> AsyncIterator[FastAPI]:
     """The real application, lifespan running against the containers.
 
     The lifespan is entered directly (`router.lifespan_context`), so no extra
-    dependency is needed. Afterwards both ways the app reaches the database are
-    redirected into the test transaction: the request dependency and the factory.
+    dependency is needed. Afterwards the session factory, the one way the app reaches
+    the database (the real `get_session` included), is redirected into the test
+    transaction.
     """
-
-    async def test_get_session() -> AsyncIterator[AsyncSession]:
-        # Mirrors get_session: roll back (to the savepoint) when the request fails.
-        try:
-            yield db_session
-        except Exception:
-            await db_session.rollback()
-            raise
-
     application = create_app(test_settings)
-    application.dependency_overrides[get_session] = test_get_session
     async with application.router.lifespan_context(application):
         application.state.session_factory = test_session_factory
         yield application
