@@ -16,7 +16,7 @@ M0 builds the pipeline every later feature goes through. There are no user featu
 | Database layer and Alembic pipeline (the first migration is empty on purpose) | Any student-facing feature (starts in M1) |
 | Tests against real PostgreSQL and Redis containers, 80% branch-coverage floor | |
 | JSON logs, `X-Request-ID`, RFC 9457 error responses | |
-| CI workflow with jobs `lint`, `typecheck`, `test`, `migrations`, `build` (not yet run on GitHub) | |
+| CI workflow with jobs `lint`, `typecheck`, `test`, `migrations`, `build`, green on GitHub | |
 
 ## Quick start (about 5 minutes)
 
@@ -154,6 +154,8 @@ up/down consistency, models match the schema).
 ## Documentation
 
 - [Architecture](docs/architecture.md): system context, containers, module boundaries, cross-cutting conventions
+- [Conventions](docs/conventions.md): the binding rules for code (configuration, HTTP and error contract,
+  logging, database, resource budget, quality gates)
 - [Architecture decision records](docs/adr/README.md), including
   [0001 modular monolith](docs/adr/0001-modular-monolith.md),
   [0002 FastAPI + SQLAlchemy](docs/adr/0002-fastapi-sqlalchemy.md),
@@ -171,6 +173,6 @@ Not yet chosen. Until a license is added, no rights to reuse this code are grant
 
 ---
 
-Owner: project owner (backend maintainer). Last reviewed: 2026-11-12, end of M0 (before CI's first
-run on GitHub). Update at the end of each milestone, and whenever a `make` target, port or required
-tool changes.
+Owner: project owner (backend maintainer). Last reviewed: 2026-11-17, end of M0 (CI green on
+GitHub, run 43232548746). Update at the end of each milestone, and whenever a `make` target, port
+or required tool changes.

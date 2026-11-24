@@ -19,6 +19,9 @@ The decisions behind this shape are recorded as ADRs:
 - [ADR 0006 — Three repositories](adr/0006-three-repositories.md)
 - ADR 0005 is reserved for the M1 LLM benchmark.
 
+The rules code must follow (configuration, HTTP and error contract, logging, database, resource budget, quality
+gates) are in [conventions.md](conventions.md).
+
 Diagrams use Mermaid `flowchart`, not Mermaid's `C4Context` syntax: the C4 diagram type is marked experimental by
 Mermaid and its layout is hard to control, while `flowchart` renders reliably on GitHub. The diagrams follow the
 C4 levels (context, containers); dashed boxes are not yet built.
@@ -137,6 +140,9 @@ Rules, checked in CI by `import-linter` (except where noted):
 3. **Dependency direction:** `core <- modules`. Modules import `core`; `core` never imports `app.modules`.
 
 ## 4. Cross-cutting conventions (as of M0)
+
+A summary; the binding, detailed rules (every setting, error code, log field and budget) are in
+[conventions.md](conventions.md).
 
 **Configuration.** Everything comes from environment variables, validated at startup by `pydantic-settings`; the
 app refuses to start if a required value is missing or invalid. `.env.example` lists every variable; `.env` is never
