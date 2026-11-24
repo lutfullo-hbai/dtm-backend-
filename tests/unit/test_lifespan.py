@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import Settings
 from app.main import create_app
+from app.modules.health.service import ReadinessService
 
 # Nothing connects: the engine and Redis client open connections only on first use.
 _SETTINGS = Settings(
@@ -54,3 +55,26 @@ async def test_engine_is_disposed_once_on_normal_shutdown(disposed: list[AsyncEn
         assert disposed == []
 
     assert len(disposed) == 1
+
+
+async def test_readiness_probes_are_drained_before_the_engine_is_disposed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[str] = []
+    original_dispose = AsyncEngine.dispose
+
+    async def record_dispose(self: AsyncEngine, close: bool = True) -> None:  # noqa: FBT001, FBT002  # mirrors AsyncEngine.dispose
+        closed.append("engine")
+        await original_dispose(self, close)
+
+    async def record_aclose(_self: ReadinessService) -> None:
+        closed.append("readiness")
+
+    monkeypatch.setattr(AsyncEngine, "dispose", record_dispose)
+    monkeypatch.setattr(ReadinessService, "aclose", record_aclose)
+    app = create_app(_SETTINGS)
+
+    async with app.router.lifespan_context(app):
+        assert closed == []
+
+    assert closed == ["readiness", "engine"]

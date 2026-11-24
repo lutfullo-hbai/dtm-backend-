@@ -1,9 +1,12 @@
 """Database values in an error never reach the log, whichever side quotes them.
 
 asyncpg quotes a value it rejects client-side ("query argument $1: '...'"); PostgreSQL
-quotes a value it cannot cast ('invalid input syntax for type integer: "..."') and
-repeats the row's values in the DETAIL line of a constraint violation. Every case is
-raised against the real server and logged in both formats.
+quotes a value it cannot cast ('invalid input syntax for type integer: "..."'), repeats
+the row's values in the DETAIL line of a constraint violation and formats a PL/pgSQL
+RAISE with its arguments. A database error's message is withheld whatever its wording
+(app.core.log_redaction); every case is raised against the real server and logged in
+both formats. Values are passed as bound parameters, never written into this file, so
+a traceback's source lines cannot contain them.
 """
 
 import json
@@ -19,6 +22,7 @@ from app.core.logging import configure_logging, get_logger
 
 _PERSONAL = "Pers0nal-Value-7"
 _FORMATS = ["json", "console"]
+_WITHHELD = "<message withheld: database error>"
 
 # Rolled back with the test's transaction: nothing is left on the shared database.
 _SCHEMA = (
@@ -26,6 +30,8 @@ _SCHEMA = (
     "CREATE TABLE redaction_user (email text PRIMARY KEY)",
     "CREATE TABLE redaction_person (age integer NOT NULL CHECK (age > 0), name text)",
     "CREATE TABLE redaction_account (email text REFERENCES redaction_user (email))",
+    "CREATE FUNCTION redaction_raise(v text) RETURNS void LANGUAGE plpgsql"
+    " AS $$ BEGIN RAISE EXCEPTION 'user email %', v; END $$",
 )
 
 # Each case: the statement, the value it quotes, and the expected sqlstate,
@@ -102,6 +108,43 @@ _SERVER_CASES = {
         None,
         None,
     ),
+    # The value continues on the next line, past any line-based pattern.
+    "newline_in_cast": (
+        "SELECT CAST(CAST(:v AS text) AS integer)",
+        "Line-Secret-0\nNewline-Secret-A1",
+        "22P02",
+        None,
+        None,
+    ),
+    "unique_multiline_detail": (
+        "INSERT INTO redaction_user (email) VALUES (:v), (:v)",
+        "multi\nDetail-Secret-9",
+        "23505",
+        "redaction_user_pkey",
+        None,
+    ),
+    "time_zone": (
+        "SELECT now() AT TIME ZONE CAST(:v AS text)",
+        "Tz-Secret-10",
+        "22023",
+        None,
+        None,
+    ),
+    "to_date": ("SELECT to_date(CAST(:v AS text), 'YYYY')", "SECR", "22007", None, None),
+    "regclass": (
+        "SELECT CAST(CAST(:v AS text) AS regclass)",
+        "secret-rel-11",
+        "42P01",
+        None,
+        None,
+    ),
+    "plpgsql_raise": (
+        "SELECT redaction_raise(CAST(:v AS text))",
+        "raise-secret@mail.example",
+        "P0001",
+        None,
+        None,
+    ),
 }
 
 
@@ -145,7 +188,7 @@ async def test_rejected_bound_value_never_reaches_the_log(
     _log_exception(error)
 
     out = capsys.readouterr().out
-    assert "query argument $1: [REDACTED]" in out
+    assert f"DBAPIError: {_WITHHELD}" in out  # type and frames kept, message withheld
     assert _PERSONAL not in out
 
 
@@ -163,8 +206,9 @@ async def test_server_quoted_value_never_reaches_the_log(
     _log_exception(error)
 
     out = capsys.readouterr().out
-    assert "[REDACTED]" in out
-    assert value.strip("{") not in out
+    assert _WITHHELD in out
+    for part in value.strip("{").split("\n"):
+        assert part not in out
 
 
 @pytest.mark.parametrize("case", sorted(_SERVER_CASES))
@@ -184,6 +228,27 @@ async def test_server_error_identifiers_are_logged_without_values(
     assert db_error.get("column_name") == column
 
 
+@pytest.mark.parametrize("case", ["unique_multiline_detail", "time_zone", "plpgsql_raise"])
+async def test_str_of_a_database_error_in_nested_fields_is_withheld(
+    test_settings: Settings, capsys: pytest.CaptureFixture[str], case: str
+) -> None:
+    """The secondary layer: str(error) put in nested fields by app code (the rule forbids it)."""
+    statement, value, *_ = _SERVER_CASES[case]
+    configure_logging("INFO", "json")
+    error = await _raise_from_database(test_settings, statement, value)
+
+    get_logger("app.test").warning(
+        "query_failed", ctx={"error": str(error)}, items=[str(error)], pair=(1, str(error))
+    )
+
+    (line,) = capsys.readouterr().out.splitlines()
+    assert json.loads(line)["ctx"] == {"error": _WITHHELD}
+    assert json.loads(line)["items"] == [_WITHHELD]
+    assert json.loads(line)["pair"] == [1, _WITHHELD]
+    for part in value.split("\n"):
+        assert part not in line
+
+
 def test_a_value_quoted_in_a_plain_message_is_redacted(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -191,8 +256,9 @@ def test_a_value_quoted_in_a_plain_message_is_redacted(
     configure_logging("INFO", "json")
     message = 'invalid input syntax for type integer: "a"b-Secret"\nDETAIL:  Key (x)=(Row-Secret)'
 
-    get_logger("app.test").error("query_failed", error=message)
+    get_logger("app.test").error("query_failed", error=message, nested={"errors": [message]})
 
     (line,) = capsys.readouterr().out.splitlines()
-    error = json.loads(line)["error"]
-    assert error == "invalid input syntax for type integer: [REDACTED]\nDETAIL: [REDACTED]"
+    expected = "invalid input syntax for type integer: [REDACTED]\nDETAIL: [REDACTED]"
+    assert json.loads(line)["error"] == expected
+    assert json.loads(line)["nested"] == {"errors": [expected]}
