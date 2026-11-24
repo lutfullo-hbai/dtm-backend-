@@ -1,0 +1,3 @@
+# Changes to CI and repository automation need the owner's review. This takes effect
+# only when a branch ruleset (or branch protection) requires review from code owners.
+/.github/ @lutfullo-hbai
